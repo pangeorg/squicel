@@ -2,34 +2,6 @@
 #include <stdlib.h>
 #include "sqio.h"
 
-InputBuffer *InputBuffer_new() {
-  InputBuffer *input_buffer = (InputBuffer *)malloc(sizeof(InputBuffer));
-  input_buffer->buffer = NULL;
-  input_buffer->buffer_length = 0;
-  input_buffer->input_length = 0;
-
-  return input_buffer;
-}
-
-void InputBuffer_free(InputBuffer *buffer) {
-  free(buffer->buffer);
-  free(buffer);
-}
-
-void read_input(InputBuffer *input_buffer) {
-  size_t bytes_read =
-      getline(&(input_buffer->buffer), &(input_buffer->buffer_length), stdin);
-
-  if (bytes_read <= 0) {
-    printf("Error reading input\n");
-    exit(EXIT_FAILURE);
-  }
-
-  // Ignore trailing newline
-  input_buffer->input_length = bytes_read - 1;
-  input_buffer->buffer[bytes_read - 1] = 0;
-}
-
 // from
 // https://stackoverflow.com/questions/735126/are-there-alternate-implementations-of-gnu-getline-interface
 // probably buggy

@@ -1,7 +1,3 @@
-
-#ifndef TESTS_H_
-#define TESTS_H_
+#pragma once
 
 void run_tests();
-
-#endif // !TESTS_H
