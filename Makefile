@@ -1,76 +1,41 @@
-# tool macros
 CC = gcc
-CFLAGS := -Wall -Wextra
-DBGFLAGS := -g3
-COBJFLAGS := $(CFLAGS) -c
-TESTFLAGS := -DTESTS
+CFLAGS = -Wall -ggdb
+SRC_DIR = src
+OBJ_DIR = obj
+BIN_DIR = bin
 
-# path macros
-BIN_PATH := bin
-OBJ_PATH := obj
-SRC_PATH := src
-DBG_PATH := debug
+# List of source files (assuming all .c files in src/)
+SRC_FILES = $(wildcard $(SRC_DIR)/*.c)
+HDR_FILES = $(wildcard $(SRC_DIR)/*.h)
 
-# compile macros
-TARGET_NAME := squicel
-ifeq ($(OS),Windows_NT)
-	TARGET_NAME := $(addsuffix .exe,$(TARGET_NAME))
-endif
-TARGET := $(BIN_PATH)/$(TARGET_NAME)
-TARGET_DEBUG := $(DBG_PATH)/$(TARGET_NAME)
+# Generate a list of object file names by replacing .c with .o
+OBJ_SRC_FILES = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC_FILES))
+OBJ_FILES = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC_FILES))
 
-# src files & obj files
-SRC := $(foreach x, $(SRC_PATH), $(wildcard $(addprefix $(x)/*,.c*)))
-OBJ := $(addprefix $(OBJ_PATH)/, $(addsuffix .o, $(notdir $(basename $(SRC)))))
-OBJ_DEBUG := $(addprefix $(DBG_PATH)/, $(addsuffix .o, $(notdir $(basename $(SRC)))))
+# Default target: build the executable
+all: $(BIN_DIR)/squicel
 
-# clean files list
-DISTCLEAN_LIST := $(OBJ) \
-                  $(OBJ_DEBUG)
-CLEAN_LIST := $(TARGET) \
-			  $(TARGET_DEBUG) \
-			  $(DISTCLEAN_LIST)
+# Copy source files to the obj directory
+$(OBJ_DIR)/%.c: $(SRC_DIR)/%.c
+	cp $< $@
 
-# default rule
-default: all
+$(OBJ_DIR)/%.h: $(SRC_DIR)/%.h
+	cp $< $@
 
-# non-phony targets
-$(TARGET): $(OBJ)
-	$(CC) -o $@ $(OBJ) $(CFLAGS)
+# Compile the object files
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TARGET_TEST): $(OBJ)
-	$(CC) -o $@ $(OBJ) $(CFLAGS)
+# Create the executable from object files
+$(BIN_DIR)/squicel: $(OBJ_FILES)
+	$(CC) $(CFLAGS) $^ -o $@
 
-$(OBJ_PATH)/%.o: $(SRC_PATH)/%.c*
-	$(CC) $(COBJFLAGS) -o $@ $<
-
-$(DBG_PATH)/%.o: $(SRC_PATH)/%.c*
-	$(CC) $(COBJFLAGS) $(DBGFLAGS) -o $@ $<
-
-$(TARGET_DEBUG): $(OBJ_DEBUG)
-	$(CC) $(CFLAGS) $(DBGFLAGS) $(OBJ_DEBUG) -o $@
-
-# phony rules
-.PHONY: makedir
-makedir:
-	@mkdir $(BIN_PATH) $(OBJ_PATH) $(DBG_PATH)
-
-.PHONY: all
-all: $(TARGET)
-
-.PHONY: debug
-debug: $(TARGET_DEBUG)
-
-.PHONY: test
-test: $(TARGET_TEST)
-
-.PHONY: clean
+# Clean target: remove object files
 clean:
-	@echo CLEAN $(CLEAN_LIST)
-	@rm -Force $(CLEAN_LIST)
+	rm -Force $(OBJ_DIR)/*.o
 
-.PHONY: distclean
-distclean:
-	@echo CLEAN $(DISTCLEAN_LIST)
-	@rm -f $(DISTCLEAN_LIST)
+# Target with the "-DTESTS" flag
+tests: CFLAGS += -DTESTS
+tests: all
 
+.PHONY: all clean tests
