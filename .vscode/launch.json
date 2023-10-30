@@ -11,6 +11,6 @@
             "target": "./bin/squicel.exe",
             "cwd": "${workspaceRoot}",
             "valuesFormatting": "parseText"
-        }
+        },
     ]
 }

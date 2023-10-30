@@ -3,42 +3,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include "squicel.h"
 #include "sqio.h"
-
-#define size_of_attribute(Struct, Attribute) sizeof(((Struct *)0)->Attribute)
-
-const uint32_t ID_SIZE = size_of_attribute(Row, id);
-const uint32_t USERNAME_SIZE = size_of_attribute(Row, username);
-const uint32_t EMAIL_SIZE = size_of_attribute(Row, email);
-const uint32_t ID_OFFSET = 0;
-const uint32_t USERNAME_OFFSET = ID_OFFSET + ID_SIZE;
-const uint32_t EMAIL_OFFSET = USERNAME_OFFSET + USERNAME_SIZE;
-const uint32_t ROW_SIZE = ID_SIZE + USERNAME_SIZE + EMAIL_SIZE;
-
-const uint32_t PAGE_SIZE = 4096;
-const uint32_t ROWS_PER_PAGE = PAGE_SIZE / ROW_SIZE;
-const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * TABLE_MAX_PAGES;
+#include "table.h"
 
 const char *META_EXIT = ".exit";
 const char *STMNT_SELECT = "select";
 const char *STMNT_INSERT = "insert";
 
-void *row_slot(SimpleTable *table, uint32_t row_num)
-{
-    uint32_t page_num = row_num / ROWS_PER_PAGE;
-    void *page = table->pages[page_num];
-    if (page == NULL)
-    {
-        page = table->pages[page_num] = malloc(PAGE_SIZE);
-    }
-    // how far are we into the page
-    uint32_t row_offst = row_num % ROWS_PER_PAGE;
-    // convert to byte offset
-    uint32_t byte_offst = row_offst * ROW_SIZE;
-    return page + byte_offst;
-}
 
 void print_row(Row *row)
 {
@@ -48,52 +23,23 @@ void print_row(Row *row)
 void print_table(SimpleTable *table)
 {
     Row row;
-    for (uint32_t i = 0; i < table->num_rows; ++i)
+    Cursor *c = table_start(table);
+    while (!c->end_of_table)
     {
-        deserialize_row(row_slot(table, i), &row);
+        deserialize_row(cursor_value(c), &row);
         printf("(%d, %s, %s)\n", row.id, row.username, row.email);
+        cursor_advance(c);
     }
+    free(c);
 }
 
-SimpleTable *SimpleTable_new()
-{
-    SimpleTable *t = (SimpleTable *)malloc(sizeof(SimpleTable));
-    t->num_rows = 0;
-    for (int i = 0; i < TABLE_MAX_PAGES; ++i)
-    {
-        t->pages[i] = NULL;
-    }
-    return t;
-}
 
-void SimpleTable_free(SimpleTable *t)
-{
-    for (uint32_t page_num = 0; page_num < TABLE_MAX_PAGES; ++page_num)
-    {
-        free(t->pages[page_num]);
-    }
-    free(t);
-}
-
-void serialize_row(Row *source, void *destination)
-{
-    memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
-    memcpy(destination + USERNAME_OFFSET, &(source->username), USERNAME_SIZE);
-    memcpy(destination + EMAIL_OFFSET, &(source->email), EMAIL_SIZE);
-}
-
-void deserialize_row(void *source, Row *destination)
-{
-    memcpy(&(destination->id), source + ID_OFFSET, ID_SIZE);
-    memcpy(&(destination->username), source + USERNAME_OFFSET, USERNAME_SIZE);
-    memcpy(&(destination->email), source + EMAIL_OFFSET, EMAIL_SIZE);
-}
-
-MetaCommandResult do_meta_command(InputBuffer *buffer)
+MetaCommandResult do_meta_command(InputBuffer *buffer, SimpleTable *table)
 {
     if (strcmp(buffer->buffer, META_EXIT) == 0)
     {
         printf("\nGoodbye!\n");
+        db_close(table);
         InputBuffer_free(buffer);
         exit(EXIT_SUCCESS);
     }
@@ -110,19 +56,22 @@ PrepareResult prepare_statement(InputBuffer *input_buffer,
     {
         statement->type = STATEMENT_INSERT;
         strtok(input_buffer->buffer, " ");
-        char* id_string = strtok(NULL, " ");
-        char* username = strtok(NULL, " ");
-        char* email = strtok(NULL, " ");
+        char *id_string = strtok(NULL, " ");
+        char *username = strtok(NULL, " ");
+        char *email = strtok(NULL, " ");
 
-        if (id_string == NULL || username == NULL || email == NULL){
+        if (id_string == NULL || username == NULL || email == NULL)
+        {
             return PREPARE_SYNTAX_ERROR;
         }
         int id = atoi(id_string);
 
-        if (strlen(username) > COLUMN_USERNAME_SIZE){
+        if (strlen(username) > COLUMN_USERNAME_SIZE)
+        {
             return PREPARE_STRING_TOO_LONG;
         }
-        if (strlen(email) > COLUMN_USERNAME_SIZE){
+        if (strlen(email) > COLUMN_USERNAME_SIZE)
+        {
             return PREPARE_STRING_TOO_LONG;
         }
 
@@ -162,15 +111,17 @@ ExecuteResult execute_insert(Statement *statement, SimpleTable *table)
         return EXECUTE_FAILURE;
     }
 
-    if (table->num_rows >= TABLE_MAX_ROWS)
+    void *node = get_page(table->pager, table->root_page_num);
+    if ((*leaf_node_num_cells(node) >= LEAF_NODE_MAX_CELLS))
     {
-        printf("SimpleTable full!\n");
         return EXECUTE_TABLE_FULL;
     }
 
-    Row *row = &(statement->row_insert);
-    serialize_row(row, row_slot(table, table->num_rows));
-    table->num_rows++;
+    Cursor *c = table_end(table);
+    Row *row_to_insert = &(statement->row_insert);
+
+    leaf_node_insert(c, row_to_insert->id, row_to_insert);
+    free(c);
 
     return EXECUTE_SUCCESS;
 }
@@ -182,23 +133,32 @@ ExecuteResult execute_select(Statement *statement, SimpleTable *table)
         printf("Trying to execute select while statement type is different!\n");
         return EXECUTE_FAILURE;
     }
+    Cursor *c = table_start(table);
 
     Row row;
-    for (uint32_t i = 0; i < table->num_rows; ++i)
+    while (!c->end_of_table)
     {
-        deserialize_row(row_slot(table, i), &row);
+        deserialize_row(cursor_value(c), &row);
         print_row(&row);
+        cursor_advance(c);
     }
 
+    free(c);
     return EXECUTE_SUCCESS;
 }
 
 void process_input(InputBuffer *input_buffer, SimpleTable *table)
 {
+    // ignore empty lines
+    if (strlen(input_buffer->buffer) == 0)
+    {
+        return;
+    }
+
     // check if we do a meta command
     if (input_buffer->buffer[0] == '.')
     {
-        switch (do_meta_command(input_buffer))
+        switch (do_meta_command(input_buffer, table))
         {
         case (META_COMMAND_SUCCESS):
             return;
@@ -259,12 +219,57 @@ void read_input(InputBuffer *input_buffer)
     input_buffer->buffer[bytes_read - 1] = 0;
 }
 
+Cursor *table_start(SimpleTable *table)
+{
+    Cursor *cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->page_num = table->root_page_num;
+    cursor->cell_num = 0;
+    void *root_node = get_page(table->pager, table->root_page_num);
+    uint32_t num_cells = *leaf_node_num_cells(root_node);
+    cursor->end_of_table = (num_cells == 0);
+    return cursor;
+}
+
+Cursor *table_end(SimpleTable *table)
+{
+    Cursor *cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->page_num = table->root_page_num;
+
+    void *root_node = get_page(table->pager, table->root_page_num);
+    uint32_t num_cells = *leaf_node_num_cells(root_node);
+    cursor->cell_num = num_cells;
+    cursor->end_of_table = true;
+    return cursor;
+}
+
+void cursor_advance(Cursor *cursor)
+{
+    uint32_t page_num = cursor->page_num;
+    void *node = get_page(cursor->table->pager, page_num);
+
+    cursor->cell_num += 1;
+    if (cursor->cell_num >= (*leaf_node_num_cells(node)))
+    {
+        cursor->end_of_table = true;
+    }
+}
+
+void *cursor_value(Cursor *cursor)
+{
+    uint32_t page_num = cursor->page_num;
+    void *page = get_page(cursor->table->pager, page_num);
+    // how far are we into the page
+    return leaf_node_value(page, cursor->cell_num);
+}
+
 void print_prompt() { printf("clite > "); }
 
-void squicel()
+void squicel(const char *filename)
 {
     InputBuffer *input_buffer = InputBuffer_new();
-    SimpleTable *table = SimpleTable_new();
+    SimpleTable *table = SimpleTable_open(filename);
     while (true)
     {
         print_prompt();
@@ -272,4 +277,3 @@ void squicel()
         process_input(input_buffer, table);
     }
 }
-
