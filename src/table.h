@@ -59,4 +59,10 @@ Cursor *table_start(SimpleTable *table);
 Cursor *table_end(SimpleTable *table);
 void cursor_advance(Cursor *cursor);
 
+Cursor* table_find(SimpleTable* table, uint32_t key);
+Cursor* leaf_node_find(SimpleTable* table, uint32_t page_num, uint32_t key);
+Cursor *table_start(SimpleTable *table);
+NodeType get_node_type(void* node);
+void set_node_type(void* node, NodeType type);
+
 #endif

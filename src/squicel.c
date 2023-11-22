@@ -14,7 +14,6 @@ const char *META_EXIT = ".exit";
 const char *STMNT_SELECT = "select";
 const char *STMNT_INSERT = "insert";
 
-
 void print_row(Row *row)
 {
     printf("(%d, %s, %s)\n", row->id, row->username, row->email);
@@ -32,7 +31,6 @@ void print_table(SimpleTable *table)
     }
     free(c);
 }
-
 
 MetaCommandResult do_meta_command(InputBuffer *buffer, SimpleTable *table)
 {
@@ -112,16 +110,27 @@ ExecuteResult execute_insert(Statement *statement, SimpleTable *table)
     }
 
     void *node = get_page(table->pager, table->root_page_num);
-    if ((*leaf_node_num_cells(node) >= LEAF_NODE_MAX_CELLS))
+    uint32_t num_cells = *leaf_node_num_cells(node);
+    if (num_cells >= LEAF_NODE_MAX_CELLS)
     {
         return EXECUTE_TABLE_FULL;
     }
 
-    Cursor *c = table_end(table);
     Row *row_to_insert = &(statement->row_insert);
+    uint32_t key_to_insert = row_to_insert->id;
+    Cursor *cursor = table_find(table, key_to_insert);
 
-    leaf_node_insert(c, row_to_insert->id, row_to_insert);
-    free(c);
+    if (cursor->cell_num < num_cells)
+    {
+        uint32_t key_at_index = *leaf_node_key(node, cursor->cell_num);
+        if (key_at_index == key_to_insert)
+        {
+            return EXECUTE_DUPLICATE_KEY;
+        }
+    }
+
+    leaf_node_insert(cursor, row_to_insert->id, row_to_insert);
+    free(cursor);
 
     return EXECUTE_SUCCESS;
 }
@@ -184,7 +193,18 @@ void process_input(InputBuffer *input_buffer, SimpleTable *table)
         printf("STRING TOO LONG '%s'\n", input_buffer->buffer);
         return;
     }
-    execute_statement(&statement, table);
+    switch (execute_statement(&statement, table))
+    {
+    case (EXECUTE_SUCCESS):
+        printf("Executed.\n");
+        break;
+    case (EXECUTE_DUPLICATE_KEY):
+        printf("Error: Duplicate key.\n");
+        break;
+    case (EXECUTE_TABLE_FULL):
+        printf("Error: Table full.\n");
+        break;
+    }
 }
 
 InputBuffer *InputBuffer_new()
@@ -217,51 +237,6 @@ void read_input(InputBuffer *input_buffer)
     // Ignore trailing newline
     input_buffer->input_length = bytes_read - 1;
     input_buffer->buffer[bytes_read - 1] = 0;
-}
-
-Cursor *table_start(SimpleTable *table)
-{
-    Cursor *cursor = malloc(sizeof(Cursor));
-    cursor->table = table;
-    cursor->page_num = table->root_page_num;
-    cursor->cell_num = 0;
-    void *root_node = get_page(table->pager, table->root_page_num);
-    uint32_t num_cells = *leaf_node_num_cells(root_node);
-    cursor->end_of_table = (num_cells == 0);
-    return cursor;
-}
-
-Cursor *table_end(SimpleTable *table)
-{
-    Cursor *cursor = malloc(sizeof(Cursor));
-    cursor->table = table;
-    cursor->page_num = table->root_page_num;
-
-    void *root_node = get_page(table->pager, table->root_page_num);
-    uint32_t num_cells = *leaf_node_num_cells(root_node);
-    cursor->cell_num = num_cells;
-    cursor->end_of_table = true;
-    return cursor;
-}
-
-void cursor_advance(Cursor *cursor)
-{
-    uint32_t page_num = cursor->page_num;
-    void *node = get_page(cursor->table->pager, page_num);
-
-    cursor->cell_num += 1;
-    if (cursor->cell_num >= (*leaf_node_num_cells(node)))
-    {
-        cursor->end_of_table = true;
-    }
-}
-
-void *cursor_value(Cursor *cursor)
-{
-    uint32_t page_num = cursor->page_num;
-    void *page = get_page(cursor->table->pager, page_num);
-    // how far are we into the page
-    return leaf_node_value(page, cursor->cell_num);
 }
 
 void print_prompt() { printf("clite > "); }

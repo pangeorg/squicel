@@ -53,6 +53,7 @@ typedef enum
   EXECUTE_SUCCESS,
   EXECUTE_TABLE_FULL,
   EXECUTE_FAILURE,
+  EXECUTE_DUPLICATE_KEY,
 } ExecuteResult;
 
 typedef struct
