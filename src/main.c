@@ -57,25 +57,49 @@ uint16_t *node_nkeys(BNode *node) {
   return (uint16_t *)(node->data + sizeof(NodeType));
 }
 
-// returns the address of a pointer
+size_t offset_pos(BNode *node) {
+  uint16_t nkeys = *node_nkeys(node);
+  return sizeof(NodeType) + sizeof(uint16_t) + nkeys * sizeof(BNode*);
+}
+
+// returns a pointer to a node stored in the data at index idx
 BNode *get_child_node(BNode *node, int idx) {
   assert(idx < *node_nkeys(node));
-  size_t offset = sizeof(NodeType) + sizeof(uint16_t) +
-                  idx * sizeof(BNode*);
-  BNode* ptr;
-  memcpy(&ptr, (char*)node->data + offset, sizeof(BNode*));
+  size_t offset = sizeof(NodeType) + sizeof(uint16_t) + idx * sizeof(BNode *);
+  BNode *ptr;
+  memcpy(&ptr, (char *)node->data + offset, sizeof(BNode *));
   return ptr;
 }
 
+// stores a pointer to a node in the data at index idx
 void set_child_node(BNode *node, BNode *child, int idx) {
   assert(idx < *node_nkeys(node));
-  size_t offset = sizeof(NodeType) + sizeof(uint16_t) + (idx * sizeof(BNode*));
-  memcpy((char*)node->data + offset, &child, sizeof(BNode*));
+  size_t offset = sizeof(NodeType) + sizeof(uint16_t) + (idx * sizeof(BNode *));
+  memcpy((char *)node->data + offset, &child, sizeof(BNode *));
 }
 
 void set_header(BNode *node, NodeType *type, uint16_t *nkeys) {
   memcpy(node->data, (int *)type, sizeof(NodeType));
   memcpy(node->data + sizeof(NodeType), nkeys, sizeof(uint16_t));
+}
+
+// The offset is relative to the position of the first KV pair.
+// • The offset of the first KV pair is always zero, so it is not stored in the
+//   list. 
+// • We store the offset to the end of the last KV pair in the offset
+//   list, which is used to determine the size of the node.
+
+// returns a pointer to an offset stored in the data at index idx
+
+uint16_t* get_offset(BNode *node, int idx) {
+  uint16_t nkeys = *node_nkeys(node);
+  assert(1 <= idx && idx <= nkeys);
+
+  size_t data_offset = offset_pos(node) + 2 * (idx - 1);
+  uint16_t *ptr;
+
+  memcpy(&ptr, (char *)node->data + data_offset, sizeof(uint16_t *));
+  return ptr;
 }
 
 void print_header(BNode *node) {
@@ -86,7 +110,7 @@ void print_header(BNode *node) {
   printf("NKeys      :%d\n", (int)nkeys);
   printf("Pointers   :\n");
   for (int i = 0; i < nkeys; ++i) {
-    void* ptr = get_child_node(node, i);
+    void *ptr = get_child_node(node, i);
     printf("[%d]        :%p\n", i, ptr);
   }
   return;
@@ -108,11 +132,6 @@ int main() {
   set_child_node(&node, child_node_2, 1);
 
   print_header(&node);
-
-  BNode *ptr1 = get_child_node(&node, 0);
-  BNode *ptr2 = get_child_node(&node, 1);
-  printf("Adress  ptr1   : %p\n", ptr1);
-  printf("Adress  ptr2   : %p\n", ptr2);
 
   return 0;
 }
