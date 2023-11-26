@@ -66,9 +66,9 @@ uint16_t *node_nkeys(BNode *node) {
   return (uint16_t *)(node->data + sizeof(NodeType));
 }
 
-void set_header(BNode *node, NodeType *type, uint16_t *nkeys) {
+void node_set_header(BNode *node, NodeType type, uint16_t nkeys) {
   memcpy(node->data, (int *)type, sizeof(NodeType));
-  memcpy(node->data + sizeof(NodeType), nkeys, sizeof(uint16_t));
+  memcpy(node->data + sizeof(NodeType), &nkeys, sizeof(uint16_t));
 }
 
 
@@ -185,6 +185,31 @@ uint16_t node_size(BNode *node) {
   return node_get_kv_pos(node, *node_nkeys(node));
 }
 
+// insert a key into a leaf node
+void node_insert_key(BNode *dst_node, BNode *src_node, uint16_t idx) {
+  NodeType type = LEAF;
+  uint16_t nkeys = *node_nkeys(src_node);
+  node_set_header(dst_node, LEAF, nkeys);
+  assert(0 && "TODO");
+
+  // 1. copy all data from 0..idx from src to dst
+  // 2. insert new key at ids into dst
+  // 3. copy everything from idx + 1 into dst from src
+}
+
+// copy 'n' key/values from 'src_node' (from position src_pos) to 'dst_node' at dst_pos
+void node_append_range(BNode* dst_node, BNode *src_node, uint16_t dst_pos, uint16_t src_pos, uint16_t n) {
+  if (n == 0) {
+    return;
+  }
+
+  // cannot copy more than is available
+  assert(src_pos + n <= *node_nkeys(src_node));
+  // assert there is enough space set with a 'set_header'
+  assert(dst_pos + n <= *node_nkeys(dst_node));
+
+}
+
 
 void print_header(BNode *node) {
   NodeType type = node_type(node);
@@ -213,7 +238,7 @@ void run_tests() {
   BNode node = {0};
   NodeType type = NODE;
   uint16_t nkeys = 2;
-  set_header(&node, &type, &nkeys);
+  node_set_header(&node, type, nkeys);
 
   assert(NODE == node_type(&node));
   assert(2 == *node_nkeys(&node));
