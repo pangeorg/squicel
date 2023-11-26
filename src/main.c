@@ -48,9 +48,6 @@ typedef enum {
   LEAF, // nodes with values
 } NodeType;
 
-BNode get_node(uint64_t prt); // 'dereference' the pointer to a page
-uint64_t new_node(void);      // allocate new page
-void del_node(BNode *node);   // deallocate a page
 
 void check_init(void) {
   // header + 1*pointer size + 1*offset size + 1*key size + 1*val size + key +
@@ -69,11 +66,17 @@ uint16_t *node_nkeys(BNode *node) {
   return (uint16_t *)(node->data + sizeof(NodeType));
 }
 
+void set_header(BNode *node, NodeType *type, uint16_t *nkeys) {
+  memcpy(node->data, (int *)type, sizeof(NodeType));
+  memcpy(node->data + sizeof(NodeType), nkeys, sizeof(uint16_t));
+}
+
+
 // returns the position of an offset at index idx
 //                     size until->
 //    | type | nkeys | pointers   | offsets    | key-values
 //    | 2B   | 2B    | nkeys * 8B | nkeys * 2B | ...
-size_t offset_pos(BNode *node, int idx) {
+size_t node_offset_pos(BNode *node, int idx) {
   uint16_t nkeys = *node_nkeys(node);
   assert(1 <= idx && idx <= nkeys);
   return header_size() + nkeys * sizeof(BNode*) + sizeof(uint16_t) * (idx - 1);;
@@ -86,46 +89,49 @@ size_t offset_pos(BNode *node, int idx) {
 //   list, which is used to determine the size of the node.
 
 // returns the offset starting from the first kv pair
-uint16_t get_offset(BNode *node, int idx) {
+uint16_t node_get_offset(BNode *node, int idx) {
   if (idx == 0) {
     return 0;
   }
-  size_t data_offset = offset_pos(node, idx);
+  size_t data_offset = node_offset_pos(node, idx);
   uint16_t ptr;
   memcpy(&ptr, (char *)node->data + data_offset, sizeof(uint16_t));
   return ptr;
 }
 
-void set_offset(BNode *node, int idx, uint16_t offset) {
-  size_t data_offset = offset_pos(node, idx);
+void node_set_offset(BNode *node, int idx, uint16_t offset) {
+  size_t data_offset = node_offset_pos(node, idx);
   memcpy((char *)node->data + data_offset, &offset, sizeof(uint16_t));
 }
 
-uint16_t get_kv_pos(BNode* node, int idx) {
+uint16_t node_get_kv_pos(BNode* node, int idx) {
   size_t nkeys = *node_nkeys(node);
   assert(idx <= nkeys);
 
-  uint16_t offset = get_offset(node, idx);
+  uint16_t offset = node_get_offset(node, idx);
   // header + pointers + offsets + offset[idx]
   return header_size() + nkeys * sizeof(BNode*) + nkeys * sizeof(uint16_t) + offset;
 }
 
-char *get_key(BNode *node, int idx){
-  uint16_t pos = get_kv_pos(node, idx);
+// returns the key at idx
+char *node_get_key(BNode *node, int idx){
+  uint16_t pos = node_get_kv_pos(node, idx);
   char* ptr;
   memcpy(&ptr, (char *)node->data + pos + 2 * sizeof(uint16_t), sizeof(char*));
   return ptr;
 }
 
-uint16_t get_key_size(BNode *node, int idx){
-  uint16_t pos = get_kv_pos(node, idx);
+// returns the key size at idx
+uint16_t node_get_key_size(BNode *node, int idx){
+  uint16_t pos = node_get_kv_pos(node, idx);
   uint16_t key_size;
   memcpy(&key_size, (char *)node->data + pos, sizeof(uint16_t));
   return key_size;
 }
 
-char *get_val(BNode *node, int idx){
-  uint16_t pos = get_kv_pos(node, idx);
+// returns the value at idx
+char *node_get_val(BNode *node, int idx){
+  uint16_t pos = node_get_kv_pos(node, idx);
   uint16_t key_size;
   memcpy(&key_size, (char *)node->data + pos, sizeof(uint16_t));
   char* ptr;
@@ -139,7 +145,7 @@ char *get_val(BNode *node, int idx){
 //    | type | nkeys | pointers   | offsets    | key-values
 //    | 2B   | 2B    | nkeys * 8B | nkeys * 2B | ...
 
-BNode *get_child_node(BNode *node, int idx) {
+BNode *node_get_child(BNode *node, int idx) {
   assert(idx < *node_nkeys(node));
   size_t offset = header_size() + idx * sizeof(BNode *);
   BNode *ptr;
@@ -148,15 +154,10 @@ BNode *get_child_node(BNode *node, int idx) {
 }
 
 // stores a pointer to a node in the data at index idx
-void set_child_node(BNode *node, BNode *child, int idx) {
+void node_set_child(BNode *node, BNode *child, int idx) {
   assert(idx < *node_nkeys(node));
   size_t offset = header_size() + (idx * sizeof(BNode *));
   memcpy((char *)node->data + offset, &child, sizeof(BNode *));
-}
-
-void set_header(BNode *node, NodeType *type, uint16_t *nkeys) {
-  memcpy(node->data, (int *)type, sizeof(NodeType));
-  memcpy(node->data + sizeof(NodeType), nkeys, sizeof(uint16_t));
 }
 
 // returns the index of the first kid node whose range intersects the key. (kid[i] <= key)
@@ -166,9 +167,9 @@ uint16_t node_ins_idx(BNode *node, char* key){
   uint16_t found = 0;
 
   for (uint16_t i = 0; i < nkeys; ++i){
-    uint16_t key_size = get_key_size(node, i);
-    char *node_key = get_key(node, i);
-    int cmp = memcmp(get_key(node, i), key, key_size);
+    uint16_t key_size = node_get_key_size(node, i);
+    char *node_key = node_get_key(node, i);
+    int cmp = memcmp(node_get_key(node, i), key, key_size);
     if (cmp <= 0) {
       found = i;
     }
@@ -178,6 +179,10 @@ uint16_t node_ins_idx(BNode *node, char* key){
   }
 
   return found;
+}
+
+uint16_t node_size(BNode *node) {
+  return node_get_kv_pos(node, *node_nkeys(node));
 }
 
 
@@ -190,13 +195,13 @@ void print_header(BNode *node) {
 
   printf("Pointers   :\n");
   for (int i = 0; i < nkeys; ++i) {
-    void *ptr = get_child_node(node, i);
+    void *ptr = node_get_child(node, i);
     printf("[%d]        :%p\n", i, ptr);
   }
 
   printf("Offsets    :\n");
   for (int i = 0; i < nkeys; ++i) {
-    uint16_t offset = get_offset(node, i);
+    uint16_t offset = node_get_offset(node, i);
     printf("[%d]        :%d\n", i, offset);
   }
 
@@ -216,13 +221,13 @@ void run_tests() {
   BNode child_node_1 = {0};
   BNode child_node_2 = {0};
 
-  set_child_node(&node, &child_node_1, 0);
-  set_child_node(&node, &child_node_2, 1);
-  set_offset(&node, 1, 12);
+  node_set_child(&node, &child_node_1, 0);
+  node_set_child(&node, &child_node_2, 1);
+  node_set_offset(&node, 1, 12);
 
-  assert(&child_node_1 == get_child_node(&node, 0));
-  assert(&child_node_2 == get_child_node(&node, 1));
-  assert(12 == get_offset(&node, 1));
+  assert(&child_node_1 == node_get_child(&node, 0));
+  assert(&child_node_2 == node_get_child(&node, 1));
+  assert(12 == node_get_offset(&node, 1));
 
   printf("All tests passed !\n");
 }
